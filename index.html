@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Wall Panel Designer</title>
+  <style>
+    :root { color-scheme: light; --ink: #172033; --muted: #68738a; --line: #dbe2ec; --panel: #ffffff; --page: #f4f7fb; --accent: #335eea; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--page); color: var(--ink); font: 16px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .app { max-width: 1320px; margin: 0 auto; padding: 32px 20px 48px; }
+    header { margin-bottom: 24px; }
+    h1 { margin: 0; font-size: clamp(1.75rem, 4vw, 2.5rem); letter-spacing: -.04em; }
+    header p { margin: 7px 0 0; color: var(--muted); }
+    .workspace { display: grid; grid-template-columns: minmax(250px, 320px) 1fr; gap: 24px; align-items: start; }
+    .controls, .canvas-panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 8px 28px rgba(28, 48, 80, .06); }
+    .controls { padding: 20px; }
+    .control-group { border: 0; padding: 0; margin: 0 0 22px; }
+    .control-group:last-child { margin-bottom: 0; }
+    legend, .label { font-weight: 750; margin-bottom: 9px; display: block; }
+    .hint { font-size: .83rem; color: var(--muted); margin: -4px 0 10px; }
+    input[type="number"], select { width: 100%; border: 1px solid #bfc9d8; border-radius: 8px; color: var(--ink); background: #fff; padding: 9px 10px; font: inherit; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .rotation-inputs { display: grid; grid-template-columns: 1fr 82px; gap: 10px; align-items: center; }
+    input:focus, select:focus, button:focus-visible { outline: 3px solid rgba(51, 94, 234, .25); outline-offset: 2px; }
+    button { border: 0; cursor: pointer; border-radius: 8px; padding: 9px 12px; color: #fff; background: var(--accent); font: inherit; font-weight: 650; }
+    button:hover { filter: brightness(.94); }
+    button.secondary { color: var(--ink); background: #e9eef6; }
+    button.danger { color: #a01c2c; background: #fee9ed; }
+    button.is-active { color: #fff; background: #a01c2c; }
+    .button-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+    .button-row button { flex: 1 1 115px; }
+    .color-list { display: grid; gap: 8px; }
+    .color-row { display: grid; grid-template-columns: 24px 1fr 32px; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 7px; }
+    .color-row:has(input[type="radio"]:checked) { border-color: var(--accent); background: #f4f7ff; }
+    .color-row input[type="radio"] { margin: 0; accent-color: var(--accent); }
+    .color-row input[type="color"] { width: 32px; height: 28px; padding: 0; border: 0; background: none; cursor: pointer; }
+    .color-name { font-size: .9rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+    .error { min-height: 1.3em; margin: 7px 0 0; font-size: .86rem; color: #b02033; }
+    .canvas-panel { min-width: 0; padding: 20px; }
+    .canvas-heading { display: flex; gap: 16px; align-items: baseline; justify-content: space-between; margin-bottom: 16px; }
+    h2 { margin: 0; font-size: 1.15rem; }
+    #gridSummary { margin: 0; font-size: .88rem; color: var(--muted); }
+    .grid-wrap { overflow: auto; max-height: calc(100vh - 200px); border: 1px solid var(--line); border-radius: 10px; background: #f8fafc; }
+    #grid { --grid-size: 16; display: grid; grid-template-columns: repeat(var(--grid-size), minmax(22px, 1fr)); gap: 2px; min-width: max(100%, calc(var(--grid-size) * 22px)); aspect-ratio: 1; padding: 2px; }
+    /* A true tessellation used when triangles are the active shape. */
+    #grid.triangle-lattice { display: block; min-width: max(100%, calc(var(--grid-size) * 22px)); aspect-ratio: auto; padding: 0; }
+    #grid.polygon-lattice { display: block; min-width: max(100%, calc(var(--grid-size) * 22px)); aspect-ratio: auto; padding: 0; }
+    #grid.square-fit-grid { gap: 0; padding: var(--square-buffer); background-color: #77849a; }
+    #grid.square-fit-grid:hover:not(:has(.cell:hover)) { background-color: #b97b89; box-shadow: inset 0 0 20px rgba(255, 112, 137, .38); }
+    .triangle-lattice-svg { display: block; width: 100%; height: auto; }
+    .lattice-cell { cursor: pointer; stroke: #dbe2ec; stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .lattice-buffer { fill: #77849a; stroke: #9da9ba; cursor: crosshair; opacity: .74; }
+    .lattice-buffer:hover { fill: #b97b89; stroke: #ff9bab; opacity: .95; filter: drop-shadow(0 0 5px rgba(255, 112, 137, .55)); }
+    .lattice-cell:hover { filter: brightness(.92); stroke: var(--accent); stroke-width: 2; }
+    .lattice-cell:focus { outline: none; stroke: var(--accent); stroke-width: 3; }
+    .cell { position: relative; min-width: 0; aspect-ratio: 1; border: 0; border-radius: 1px; padding: 0; overflow: hidden; background: #eef2f7; cursor: pointer; }
+    .cell:hover { background: #e0e8f8; }
+    .cell:focus-visible { z-index: 1; outline: 3px solid var(--accent); outline-offset: -2px; }
+    /* The actual shape is an SVG polygon generated from its number of sides. */
+    .placed-shape { display: block; width: 100%; height: 100%; pointer-events: none; }
+    /* Modern gamer-theme layer */
+    :root { color-scheme: dark; --ink: #f2f6ff; --muted: #91a0bd; --line: rgba(128, 155, 212, .22); --panel: rgba(14, 20, 43, .88); --page: #070a16; --accent: #63e8ff; --violet: #9b74ff; --danger: #ff4f7c; --empty-cell: #A9DEFE; }
+    body { min-height: 100vh; background: radial-gradient(circle at 8% 5%, rgba(88, 61, 187, .34), transparent 30rem), radial-gradient(circle at 92% 72%, rgba(0, 197, 255, .17), transparent 28rem), #070a16; color: var(--ink); }
+    body::before { content: ""; position: fixed; z-index: -1; inset: 0; pointer-events: none; opacity: .25; background-image: linear-gradient(rgba(105, 128, 190, .1) 1px, transparent 1px), linear-gradient(90deg, rgba(105, 128, 190, .1) 1px, transparent 1px); background-size: 32px 32px; mask-image: linear-gradient(to bottom, black, transparent 80%); }
+    .app { position: relative; padding-top: 46px; }
+    header { display: flex; align-items: center; gap: 14px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 18px; background: linear-gradient(105deg, rgba(24, 34, 70, .9), rgba(14, 20, 43, .66)); box-shadow: 0 18px 45px rgba(0, 0, 0, .25), inset 0 1px rgba(255,255,255,.06); }
+    header::before { content: "◆"; display: grid; place-items: center; width: 44px; height: 44px; color: #07101d; background: linear-gradient(135deg, var(--accent), var(--violet)); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); text-shadow: none; font-size: .8rem; }
+    h1 { font-size: clamp(1.8rem, 4vw, 2.65rem); line-height: 1; text-transform: uppercase; letter-spacing: .04em; text-shadow: 0 0 24px rgba(99, 232, 255, .28); }
+    header p { color: var(--muted); }
+    .controls, .canvas-panel { background: linear-gradient(145deg, rgba(22, 31, 62, .94), rgba(10, 15, 33, .94)); border-color: var(--line); border-radius: 18px; box-shadow: 0 18px 50px rgba(0,0,0,.28), inset 0 1px rgba(255,255,255,.045); }
+    .controls { padding: 22px; }
+    .control-group { padding-bottom: 20px; border-bottom: 1px solid rgba(128, 155, 212, .16); }
+    .control-group:last-child { padding-bottom: 0; border-bottom: 0; }
+    legend { color: var(--accent); font-size: .78rem; letter-spacing: .13em; text-transform: uppercase; }
+    .label { color: #dfe8ff; font-size: .9rem; }
+    .hint, .color-name, #gridSummary { color: var(--muted); }
+    input[type="number"], select { color: var(--ink); border-color: rgba(131, 159, 220, .35); border-radius: 9px; background: rgba(4, 8, 23, .65); }
+    input[type="range"] { accent-color: var(--accent); }
+    input:focus, select:focus, button:focus-visible { outline-color: rgba(99, 232, 255, .55); }
+    button { position: relative; overflow: hidden; border: 1px solid rgba(136, 237, 255, .55); border-radius: 9px; color: #051018; background: linear-gradient(135deg, #75efff, #55b9ff); box-shadow: 0 0 18px rgba(99, 232, 255, .16); font-size: .9rem; letter-spacing: .01em; }
+    button:hover { transform: translateY(-1px); filter: brightness(1.08); box-shadow: 0 6px 24px rgba(99, 232, 255, .23); }
+    button.secondary { color: #e5eaff; border-color: rgba(166, 134, 255, .55); background: linear-gradient(135deg, #47347d, #291f55); box-shadow: 0 0 16px rgba(155, 116, 255, .11); }
+    button.danger, button.is-active { color: #fff; border-color: rgba(255, 111, 151, .7); background: linear-gradient(135deg, #e83969, #a9184d); box-shadow: 0 0 18px rgba(255, 79, 124, .18); }
+    .color-row { border-color: rgba(128, 155, 212, .23); background: rgba(3, 8, 23, .28); }
+    .color-row:has(input[type="radio"]:checked) { border-color: var(--accent); background: rgba(37, 129, 167, .15); box-shadow: inset 3px 0 var(--accent), 0 0 16px rgba(99,232,255,.09); }
+    .color-row input[type="radio"] { accent-color: var(--accent); }
+    .canvas-panel { padding: 22px; }
+    .canvas-heading { padding-bottom: 12px; border-bottom: 1px solid rgba(128, 155, 212, .16); }
+    h2 { color: #fff; letter-spacing: .04em; text-transform: uppercase; }
+    .grid-wrap { border: 1px solid rgba(99, 232, 255, .32); border-radius: 12px; background: var(--empty-cell); box-shadow: inset 0 0 30px rgba(37, 104, 201, .12), 0 0 28px rgba(0, 0, 0, .22); }
+    #grid { background-color: var(--empty-cell); background-image: radial-gradient(rgba(22, 92, 137, .22) .8px, transparent .8px); background-size: 8px 8px; }
+    .cell { background: var(--empty-cell); box-shadow: inset 0 0 0 1px rgba(32, 112, 161, .28); }
+    .cell:hover { background: #c7eaff; box-shadow: inset 0 0 0 2px var(--accent), 0 0 14px rgba(99,232,255,.34); }
+    .lattice-cell { stroke: rgba(132, 164, 225, .38); }
+    .lattice-cell:hover { stroke: var(--accent); filter: brightness(1.12) drop-shadow(0 0 5px rgba(99,232,255,.65)); }
+    .gamer-footer { max-width: 1320px; margin: 0 auto; padding: 0 20px 30px; color: #8e9dbd; text-align: center; font-size: .77rem; letter-spacing: .16em; text-transform: uppercase; }
+    .gamer-footer span { color: var(--accent); text-shadow: 0 0 12px rgba(99,232,255,.7); }
+    @media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .grid-wrap { max-height: none; } }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header><h1>The Panel Wizard</h1><p>Choose a shape and colour, then click cells to build your panel.</p></header>
+    <div class="workspace">
+      <aside class="controls" aria-label="Design controls">
+        <fieldset class="control-group">
+          <legend>Grid size</legend>
+          <p class="hint">Enter N to create an N × N grid (1–100).</p>
+          <label class="label" for="gridSize">Shapes per side</label>
+          <input id="gridSize" type="number" min="1" max="100" value="16" inputmode="numeric">
+          <div class="button-row"><button id="generateButton" type="button">Generate grid</button></div>
+          <p id="gridError" class="error" role="alert"></p>
+        </fieldset>
+        <fieldset class="control-group">
+          <legend>Active colour</legend>
+          <div id="colorList" class="color-list" aria-label="Available colours"></div>
+          <div class="button-row"><button id="addColorButton" class="secondary" type="button">Add colour</button></div>
+        </fieldset>
+        <fieldset class="control-group">
+          <legend>Active shape</legend>
+          <label class="label" for="shapeSelect">Shape type</label>
+          <select id="shapeSelect">
+            <option value="triangle">Triangle</option><option value="square" selected>Square</option><option value="pentagon">Pentagon</option><option value="hexagon">Hexagon</option><option value="heptagon">Heptagon</option><option value="octagon">Octagon</option><option value="nonagon">Nonagon</option><option value="decagon">Decagon</option>
+          </select>
+          <label class="label" for="rotationRange" style="margin-top: 14px;">Rotation</label>
+          <div class="rotation-inputs">
+            <input id="rotationRange" type="range" min="0" max="360" step="0.01" value="90" aria-label="Shape rotation in degrees">
+            <input id="rotationInput" type="number" min="0" max="360" step="0.01" value="90" aria-label="Shape rotation in degrees">
+          </div>
+          <p class="hint">Choose the orientation for newly placed shapes.</p>
+        </fieldset>
+        <fieldset class="control-group">
+          <legend>Canvas actions</legend>
+          <div class="button-row"><button id="fillButton" type="button">Fill all</button><button id="clearCellButton" class="secondary" type="button" aria-pressed="false">Clear one cell</button><button id="clearButton" class="danger" type="button">Clear grid</button><button id="resetButton" class="secondary" type="button">Reset</button></div>
+        </fieldset>
+      </aside>
+      <section class="canvas-panel" aria-labelledby="canvasTitle">
+        <div class="canvas-heading"><h2 id="canvasTitle">Your panel</h2><p id="gridSummary">16 × 16 · 256 cells</p></div>
+        <p id="placementStatus" class="hint" aria-live="polite">Click a cell to place the active shape.</p>
+        <div class="grid-wrap"><div id="grid" role="grid" aria-label="Interactive wall panel grid"></div></div>
+      </section>
+    </div>
+  </main>
+  <footer class="gamer-footer">The Panel Wizard // <span>By Kai_N985</span></footer>
+  <script>
+    (() => {
+      // All application data lives here; `cells` is the requested 2D grid state.
+      const defaults = { size: 16, colors: ['#111111', '#ffffff'], shape: 'square', rotation: 45, activeColor: 0 };
+      // Shape metadata drives the dynamic SVG renderer; no fixed polygon paths are used.
+      const shapeDefinitions = Object.freeze({
+        triangle: { label: 'Triangle', sides: 3 }, square: { label: 'Square', sides: 4 },
+        pentagon: { label: 'Pentagon', sides: 5 }, hexagon: { label: 'Hexagon', sides: 6 },
+        heptagon: { label: 'Heptagon', sides: 7 }, octagon: { label: 'Octagon', sides: 8 },
+        nonagon: { label: 'Nonagon', sides: 9 }, decagon: { label: 'Decagon', sides: 10 }
+      });
+      const uniformLatticeShapes = new Set(['pentagon', 'heptagon', 'octagon', 'nonagon', 'decagon']);
+      // These shapes return to the original square-cell SVG fitting behaviour.
+      const squareFitShapes = new Set(['pentagon', 'heptagon', 'nonagon', 'decagon']);
+      const state = { size: defaults.size, colors: [...defaults.colors], shape: defaults.shape, rotation: defaults.rotation, activeColor: defaults.activeColor, layout: 'square', mode: 'place', cells: [] };
+      const el = {
+        grid: document.querySelector('#grid'), gridSize: document.querySelector('#gridSize'), gridError: document.querySelector('#gridError'),
+        gridSummary: document.querySelector('#gridSummary'), placementStatus: document.querySelector('#placementStatus'), colorList: document.querySelector('#colorList'), shape: document.querySelector('#shapeSelect'),
+        rotationRange: document.querySelector('#rotationRange'), rotationInput: document.querySelector('#rotationInput'), gridWrap: document.querySelector('.grid-wrap')
+      };
+      const emptyCells = size => Array.from({ length: size }, () => Array.from({ length: size }, () => null));
+      const colorLabel = hex => hex.toUpperCase();
+
+      function renderColors() {
+        el.colorList.replaceChildren();
+        state.colors.forEach((color, index) => {
+          const row = document.createElement('label'); row.className = 'color-row';
+          const radio = document.createElement('input'); radio.type = 'radio'; radio.name = 'activeColor'; radio.checked = index === state.activeColor; radio.setAttribute('aria-label', `Use ${colorLabel(color)}`);
+          radio.addEventListener('change', () => { state.activeColor = index; renderColors(); });
+          const name = document.createElement('span'); name.className = 'color-name'; name.textContent = colorLabel(color);
+          const picker = document.createElement('input'); picker.type = 'color'; picker.value = color; picker.setAttribute('aria-label', `Edit colour ${index + 1}`);
+          picker.addEventListener('input', () => { state.colors[index] = picker.value; name.textContent = colorLabel(picker.value); if (index === state.activeColor) renderGrid(); });
+          row.append(radio, name, picker); el.colorList.append(row);
+        });
+      }
+      function normalizedPolygonCoordinates(sides, rotation) {
+        const startAngle = (-90 + rotation) * Math.PI / 180;
+        const rawPoints = Array.from({ length: sides }, (_, index) => {
+          const angle = startAngle + (index * 2 * Math.PI) / sides;
+          return { x: Math.cos(angle), y: Math.sin(angle) };
+        });
+        // Fit the polygon's *rotated* bounding box precisely into the 100 × 100
+        // SVG viewBox. This preserves all edges (no clipping into an octagon).
+        const xValues = rawPoints.map(point => point.x), yValues = rawPoints.map(point => point.y);
+        const minX = Math.min(...xValues), maxX = Math.max(...xValues);
+        const minY = Math.min(...yValues), maxY = Math.max(...yValues);
+        return rawPoints.map(point => {
+          const x = ((point.x - minX) / (maxX - minX)) * 100;
+          const y = ((point.y - minY) / (maxY - minY)) * 100;
+          return { x, y };
+        });
+      }
+      function polygonPoints(sides, rotation) {
+        return normalizedPolygonCoordinates(sides, rotation).map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+      }
+      function createShapeSvg(placement) {
+        const svgNamespace = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNamespace, 'svg');
+        const polygon = document.createElementNS(svgNamespace, 'polygon');
+        svg.classList.add('placed-shape'); svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('aria-hidden', 'true');
+        polygon.setAttribute('points', polygonPoints(placement.sides, placement.rotation));
+        polygon.setAttribute('fill', placement.color);
+        svg.append(polygon);
+        return svg;
+      }
+      function renderCell(cell, value) {
+        cell.replaceChildren();
+        if (!value) { cell.setAttribute('aria-label', 'Empty cell'); return; }
+        cell.append(createShapeSvg(value));
+        cell.setAttribute('aria-label', `${value.color} ${value.shape}, ${value.sides} sides`);
+      }
+      function renderLatticeCell(cell, value) {
+        cell.setAttribute('fill', value ? value.color : '#A9DEFE');
+        const shape = cell.dataset.shape || 'shape';
+        cell.setAttribute('aria-label', value ? `${value.color} ${shape}, ${value.rotation}° orientation` : `Empty ${shape} cell`);
+      }
+      // Commit the current toolbar selection to one position in the 2D state.
+      function placeShape(row, column, cell) {
+        const definition = shapeDefinitions[state.shape];
+        const latticeRotation = cell.dataset.orientation;
+        const placement = { shape: state.shape, sides: definition.sides, rotation: latticeRotation === undefined ? state.rotation : Number(latticeRotation), color: state.colors[state.activeColor] };
+        state.cells[row][column] = placement;
+        if (cell instanceof SVGElement) renderLatticeCell(cell, placement); else renderCell(cell, placement);
+        el.placementStatus.textContent = `Placed ${placement.color.toUpperCase()} ${placement.shape} (${placement.sides} sides, ${placement.rotation}°) at row ${row + 1}, column ${column + 1}.`;
+      }
+      function clearCell(row, column, cell) {
+        state.cells[row][column] = null;
+        if (cell instanceof SVGElement) renderLatticeCell(cell, null); else renderCell(cell, null);
+        el.placementStatus.textContent = `Cleared row ${row + 1}, column ${column + 1}.`;
+      }
+      function setMode(mode) {
+        state.mode = mode;
+        const clearCellButton = document.querySelector('#clearCellButton');
+        const isClearing = mode === 'clear-one';
+        clearCellButton.classList.toggle('is-active', isClearing);
+        clearCellButton.setAttribute('aria-pressed', String(isClearing));
+      }
+      function handleCellAction(row, column, cell) {
+        if (state.mode === 'clear-one') {
+          clearCell(row, column, cell);
+          setMode('place'); // The eraser is deliberately for one selected cell only.
+          return;
+        }
+        placeShape(row, column, cell);
+      }
+      function bindCellAction(cell, row, column) {
+        let handledByPointer = false;
+        cell.addEventListener('pointerdown', () => { handledByPointer = true; handleCellAction(row, column, cell); });
+        cell.addEventListener('click', () => {
+          if (handledByPointer) { handledByPointer = false; return; }
+          handleCellAction(row, column, cell);
+        });
+        cell.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); handleCellAction(row, column, cell); }
+        });
+      }
+      function latticeOrientation(row, column) {
+        // Triangle tessellation uses its two opposing orientations. Other shapes
+        // may alternate, while the non-tessellating polygons stay uniformly aligned.
+        return state.layout === 'triangle' ? state.rotation + ((row + column) % 2) * 180 : state.rotation + ((row + column) % 2) * 180;
+      }
+      // Adjacent triangles share their diagonal edges; orientations alternate 180°.
+      function renderTriangleLattice() {
+        const svgNamespace = 'http://www.w3.org/2000/svg';
+        const side = 100, height = side * Math.sqrt(3) / 2;
+        const width = (state.size + 1) * side / 2, totalHeight = state.size * height;
+        const svg = document.createElementNS(svgNamespace, 'svg');
+        const layer = document.createElementNS(svgNamespace, 'g');
+        const buffer = 2;
+        svg.classList.add('triangle-lattice-svg'); svg.setAttribute('viewBox', `0 0 ${width} ${totalHeight}`); svg.setAttribute('role', 'grid'); svg.setAttribute('aria-label', 'Interlocking triangle panel grid');
+        layer.setAttribute('transform', `rotate(${state.rotation} ${width / 2} ${totalHeight / 2})`);
+        for (let rowIndex = -buffer; rowIndex < state.size + buffer; rowIndex += 1) {
+          for (let columnIndex = -buffer; columnIndex < state.size + buffer; columnIndex += 1) {
+          const x = columnIndex * side / 2, y = rowIndex * height;
+          const pointsUp = (rowIndex + columnIndex) % 2 === 0;
+          const points = pointsUp ? `${x},${y + height} ${x + side},${y + height} ${x + side / 2},${y}` : `${x},${y} ${x + side},${y} ${x + side / 2},${y + height}`;
+          const cell = document.createElementNS(svgNamespace, 'polygon');
+          const core = rowIndex >= 0 && rowIndex < state.size && columnIndex >= 0 && columnIndex < state.size;
+          cell.classList.add('lattice-cell'); cell.setAttribute('points', points);
+          if (core) {
+            cell.setAttribute('role', 'gridcell'); cell.setAttribute('tabindex', '0');
+            cell.dataset.orientation = String(latticeOrientation(rowIndex, columnIndex)); cell.dataset.shape = 'triangle';
+            renderLatticeCell(cell, state.cells[rowIndex][columnIndex]); bindCellAction(cell, rowIndex, columnIndex);
+          } else {
+            cell.classList.add('lattice-buffer'); cell.setAttribute('fill', '#77849a'); cell.setAttribute('aria-hidden', 'true');
+          }
+          layer.append(cell);
+          }
+        }
+        svg.append(layer); el.grid.replaceChildren(svg);
+      }
+      // Squares tessellate exactly; other non-hexagonal polygons are arranged in
+      // a staggered lattice so every polygon remains a complete, clickable cell.
+      function renderPolygonLattice() {
+        const svgNamespace = 'http://www.w3.org/2000/svg';
+        const tile = 100, isUniform = uniformLatticeShapes.has(state.layout);
+        const stagger = state.layout === 'square' || isUniform ? 0 : 50;
+        const width = state.size * tile + stagger, height = state.size * tile;
+        const definition = shapeDefinitions[state.layout];
+        const svg = document.createElementNS(svgNamespace, 'svg');
+        const layer = document.createElementNS(svgNamespace, 'g');
+        const buffer = 2;
+        // Keep each polygon in its canonical tiling position, then rotate the
+        // entire lattice (cells plus buffers) to the selected orientation.
+        const canonicalOrientation = 360 / (2 * definition.sides);
+        const latticeRotation = state.rotation - canonicalOrientation;
+        svg.classList.add('triangle-lattice-svg'); svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('role', 'grid'); svg.setAttribute('aria-label', `${definition.label} lattice panel grid`);
+        layer.setAttribute('transform', `rotate(${latticeRotation} ${width / 2} ${height / 2})`);
+        for (let rowIndex = -buffer; rowIndex < state.size + buffer; rowIndex += 1) {
+          for (let columnIndex = -buffer; columnIndex < state.size + buffer; columnIndex += 1) {
+          const x = columnIndex * tile + (rowIndex % 2 ? stagger : 0), y = rowIndex * tile;
+          const points = normalizedPolygonCoordinates(definition.sides, canonicalOrientation).map(point => `${(x + point.x).toFixed(2)},${(y + point.y).toFixed(2)}`).join(' ');
+          const cell = document.createElementNS(svgNamespace, 'polygon');
+          const core = rowIndex >= 0 && rowIndex < state.size && columnIndex >= 0 && columnIndex < state.size;
+          cell.classList.add('lattice-cell'); cell.setAttribute('points', points);
+          if (core) {
+            cell.setAttribute('role', 'gridcell'); cell.setAttribute('tabindex', '0');
+            cell.dataset.orientation = String(state.rotation); cell.dataset.shape = state.layout;
+            renderLatticeCell(cell, state.cells[rowIndex][columnIndex]); bindCellAction(cell, rowIndex, columnIndex);
+          } else {
+            cell.classList.add('lattice-buffer'); cell.setAttribute('fill', '#77849a'); cell.setAttribute('aria-hidden', 'true');
+          }
+          layer.append(cell);
+          }
+        }
+        svg.append(layer); el.grid.replaceChildren(svg);
+      }
+      // Flat-top hexagons share edges in the classic honeycomb layout.
+      function renderHexagonLattice() {
+        const svgNamespace = 'http://www.w3.org/2000/svg';
+        // Both the hexagons and the vectors between their centres rotate together.
+        // This is what keeps a true honeycomb intact at every angle.
+        const radius = 50, centreDistance = Math.sqrt(3) * radius;
+        const vertexAngle = (-90 + state.rotation) * Math.PI / 180;
+        const columnAngle = vertexAngle + Math.PI / 6, rowAngle = vertexAngle - Math.PI / 6;
+        const coordinatesFor = (rowIndex, columnIndex) => {
+          const centerX = columnIndex * centreDistance * Math.cos(columnAngle) + rowIndex * centreDistance * Math.cos(rowAngle);
+          const centerY = columnIndex * centreDistance * Math.sin(columnAngle) + rowIndex * centreDistance * Math.sin(rowAngle);
+          return Array.from({ length: 6 }, (_, index) => {
+            const angle = vertexAngle + index * Math.PI / 3;
+            return { x: centerX + radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
+          });
+        };
+        const coreItems = state.cells.flatMap((row, rowIndex) => row.map((value, columnIndex) => ({ rowIndex, columnIndex, value, core: true, coordinates: coordinatesFor(rowIndex, columnIndex) })));
+        const allPoints = coreItems.flatMap(item => item.coordinates);
+        const minX = Math.min(...allPoints.map(point => point.x)), maxX = Math.max(...allPoints.map(point => point.x));
+        const minY = Math.min(...allPoints.map(point => point.y)), maxY = Math.max(...allPoints.map(point => point.y));
+        const width = maxX - minX, height = maxY - minY;
+        // Surround the editable N × N cells with a two-cell buffer. The buffer
+        // is clipped by this core viewport, filling every rotated corner gap.
+        const buffer = 2, items = [];
+        for (let rowIndex = -buffer; rowIndex < state.size + buffer; rowIndex += 1) {
+          for (let columnIndex = -buffer; columnIndex < state.size + buffer; columnIndex += 1) {
+            const coordinates = coordinatesFor(rowIndex, columnIndex);
+            const itemMinX = Math.min(...coordinates.map(point => point.x)), itemMaxX = Math.max(...coordinates.map(point => point.x));
+            const itemMinY = Math.min(...coordinates.map(point => point.y)), itemMaxY = Math.max(...coordinates.map(point => point.y));
+            if (itemMaxX < minX || itemMinX > maxX || itemMaxY < minY || itemMinY > maxY) continue;
+            const core = rowIndex >= 0 && rowIndex < state.size && columnIndex >= 0 && columnIndex < state.size;
+            items.push({ rowIndex, columnIndex, coordinates, core, value: core ? state.cells[rowIndex][columnIndex] : null });
+          }
+        }
+        const svg = document.createElementNS(svgNamespace, 'svg');
+        svg.classList.add('triangle-lattice-svg'); svg.setAttribute('viewBox', `${minX} ${minY} ${width} ${height}`); svg.setAttribute('role', 'grid'); svg.setAttribute('aria-label', 'Hexagon honeycomb panel grid');
+        items.forEach(item => {
+          const points = item.coordinates.map(point => `${point.x.toFixed(2)},${point.y.toFixed(2)}`).join(' ');
+          const cell = document.createElementNS(svgNamespace, 'polygon');
+          cell.classList.add('lattice-cell'); cell.setAttribute('points', points);
+          if (item.core) {
+            cell.setAttribute('role', 'gridcell'); cell.setAttribute('tabindex', '0');
+            cell.dataset.orientation = String(state.rotation); cell.dataset.shape = 'hexagon';
+            renderLatticeCell(cell, item.value); bindCellAction(cell, item.rowIndex, item.columnIndex);
+          } else {
+            cell.classList.add('lattice-buffer'); cell.setAttribute('fill', '#A9DEFE'); cell.setAttribute('aria-hidden', 'true');
+          }
+          svg.append(cell);
+        });
+        el.grid.replaceChildren(svg);
+      }
+      function renderSquareFitGrid() {
+        el.grid.replaceChildren();
+        state.cells.forEach((row, rowIndex) => row.forEach((value, columnIndex) => {
+          const cell = document.createElement('button');
+          cell.type = 'button'; cell.className = 'cell'; cell.dataset.row = rowIndex; cell.dataset.column = columnIndex; cell.setAttribute('role', 'gridcell');
+          bindCellAction(cell, rowIndex, columnIndex);
+          renderCell(cell, value); el.grid.append(cell);
+        }));
+      }
+      function centerGridScroll() {
+        // Wait until the new SVG/grid has dimensions, then start at 50% on both axes.
+        requestAnimationFrame(() => {
+          el.gridWrap.scrollLeft = Math.max(0, (el.gridWrap.scrollWidth - el.gridWrap.clientWidth) / 2);
+          el.gridWrap.scrollTop = Math.max(0, (el.gridWrap.scrollHeight - el.gridWrap.clientHeight) / 2);
+        });
+      }
+      // Rebuilds the visual grid from the 2D state array.
+      function renderGrid() {
+        el.grid.style.setProperty('--grid-size', state.size);
+        el.grid.style.setProperty('--square-buffer', `${100 / (state.size + 2)}%`);
+        el.grid.classList.toggle('triangle-lattice', state.layout === 'triangle');
+        const useSquareFit = squareFitShapes.has(state.layout);
+        el.grid.classList.toggle('polygon-lattice', state.layout !== 'triangle' && !useSquareFit);
+        el.grid.classList.toggle('square-fit-grid', useSquareFit);
+        if (state.layout === 'triangle') { renderTriangleLattice(); el.gridSummary.textContent = `${state.size} × ${state.size} · ${state.size * state.size} interlocking triangles`; centerGridScroll(); return; }
+        if (state.layout === 'hexagon') { renderHexagonLattice(); el.gridSummary.textContent = `${state.size} × ${state.size} · ${state.size * state.size} hexagon honeycomb`; centerGridScroll(); return; }
+        if (useSquareFit) { renderSquareFitGrid(); el.gridSummary.textContent = `${state.size} × ${state.size} · ${state.size * state.size} square-fit ${shapeDefinitions[state.layout].label.toLowerCase()} cells`; centerGridScroll(); return; }
+        renderPolygonLattice();
+        el.gridSummary.textContent = `${state.size} × ${state.size} · ${state.size * state.size} ${shapeDefinitions[state.layout].label.toLowerCase()} lattice cells`;
+        centerGridScroll();
+      }
+      function makeGrid(size) { state.size = size; state.cells = emptyCells(size); renderGrid(); }
+      function validateAndGenerate() {
+        const size = Number(el.gridSize.value);
+        if (!Number.isInteger(size) || size < 1 || size > 100) { el.gridError.textContent = 'Please enter a whole number from 1 to 100.'; return; }
+        el.gridError.textContent = ''; makeGrid(size);
+      }
+      document.querySelector('#generateButton').addEventListener('click', validateAndGenerate);
+      el.gridSize.addEventListener('keydown', event => { if (event.key === 'Enter') validateAndGenerate(); });
+      document.querySelector('#addColorButton').addEventListener('click', () => { state.colors.push('#4f46e5'); state.activeColor = state.colors.length - 1; renderColors(); });
+      el.shape.addEventListener('change', () => {
+        state.shape = el.shape.value;
+        // Begin halfway between vertices: 360 ÷ (2 × number of sides).
+        setRotation(360 / (2 * shapeDefinitions[state.shape].sides));
+        const nextLayout = state.shape;
+        if (nextLayout !== state.layout) {
+          state.layout = nextLayout;
+          state.cells = emptyCells(state.size);
+          renderGrid();
+          el.placementStatus.textContent = nextLayout === 'triangle' ? 'Triangle lattice enabled: adjacent cells alternate by 180°.' : squareFitShapes.has(nextLayout) ? `${shapeDefinitions[nextLayout].label} square-fit grid enabled.` : uniformLatticeShapes.has(nextLayout) ? `${shapeDefinitions[nextLayout].label} uniform lattice enabled: all cells keep the same orientation.` : `${shapeDefinitions[nextLayout].label} lattice enabled: adjacent cells alternate by 180°.`;
+        }
+      });
+      function setRotation(value) {
+        const rotation = Number(value);
+        if (!Number.isFinite(rotation)) return;
+        state.rotation = Math.min(360, Math.max(0, rotation));
+        el.rotationRange.value = state.rotation; el.rotationInput.value = state.rotation;
+      }
+      function updateRotation(value) {
+        setRotation(value);
+        // Lattice geometry follows the orientation selector, particularly for hexagons.
+        if (!squareFitShapes.has(state.layout)) renderGrid();
+      }
+      el.rotationRange.addEventListener('input', () => updateRotation(el.rotationRange.value));
+      el.rotationInput.addEventListener('input', () => updateRotation(el.rotationInput.value));
+      document.querySelector('#fillButton').addEventListener('click', () => { const definition = shapeDefinitions[state.shape]; const rotationForFill = (row, column) => uniformLatticeShapes.has(state.layout) || squareFitShapes.has(state.layout) || state.layout === 'hexagon' ? state.rotation : latticeOrientation(row, column); state.cells = Array.from({ length: state.size }, (_, row) => Array.from({ length: state.size }, (_, column) => ({ shape: state.shape, sides: definition.sides, rotation: rotationForFill(row, column), color: state.colors[state.activeColor] }))); renderGrid(); });
+      document.querySelector('#clearCellButton').addEventListener('click', () => { setMode('clear-one'); el.placementStatus.textContent = 'Clear-one-cell mode: click the cell you want to remove.'; });
+      document.querySelector('#clearButton').addEventListener('click', () => { setMode('place'); state.cells = emptyCells(state.size); renderGrid(); });
+      document.querySelector('#resetButton').addEventListener('click', () => { Object.assign(state, { size: defaults.size, colors: [...defaults.colors], shape: defaults.shape, rotation: defaults.rotation, activeColor: defaults.activeColor, layout: defaults.shape, mode: 'place', cells: emptyCells(defaults.size) }); el.gridSize.value = defaults.size; el.shape.value = defaults.shape; setRotation(defaults.rotation); el.gridError.textContent = ''; renderColors(); renderGrid(); });
+      setRotation(state.rotation); makeGrid(state.size); renderColors();
+    })();
+  </script>
+</body>
+</html>
