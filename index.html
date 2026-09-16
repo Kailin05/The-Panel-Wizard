@@ -96,6 +96,9 @@
     .lattice-cell:hover { stroke: var(--accent); filter: brightness(1.12) drop-shadow(0 0 5px rgba(99,232,255,.65)); }
     .gamer-footer { max-width: 1320px; margin: 0 auto; padding: 0 20px 30px; color: #8e9dbd; text-align: center; font-size: .77rem; letter-spacing: .16em; text-transform: uppercase; }
     .gamer-footer span { color: var(--accent); text-shadow: 0 0 12px rgba(99,232,255,.7); }
+    .export-row { display: flex; justify-content: flex-end; margin-top: 14px; }
+    #downloadButton { min-width: 190px; }
+    #downloadButton[disabled] { cursor: wait; opacity: .72; transform: none; }
     @media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .grid-wrap { max-height: none; } }
   </style>
 </head>
@@ -139,10 +142,11 @@
         <div class="canvas-heading"><h2 id="canvasTitle">Your panel</h2><p id="gridSummary">16 × 16 · 256 cells</p></div>
         <p id="placementStatus" class="hint" aria-live="polite">Click a cell to place the active shape.</p>
         <div class="grid-wrap"><div id="grid" role="grid" aria-label="Interactive wall panel grid"></div></div>
+        <div class="export-row"><button id="downloadButton" type="button">Download grid as JPG</button></div>
       </section>
     </div>
   </main>
-  <footer class="gamer-footer">The Panel Wizard V1.0 // <span>By Kai_N985</span></footer>
+  <footer class="gamer-footer">The Panel Wizard V1.1 // <span>By Kai_N985</span></footer>
   <script>
     (() => {
       // All application data lives here; `cells` is the requested 2D grid state.
@@ -161,7 +165,8 @@
       const el = {
         grid: document.querySelector('#grid'), gridSize: document.querySelector('#gridSize'), gridError: document.querySelector('#gridError'),
         gridSummary: document.querySelector('#gridSummary'), placementStatus: document.querySelector('#placementStatus'), colorList: document.querySelector('#colorList'), shape: document.querySelector('#shapeSelect'),
-        rotationRange: document.querySelector('#rotationRange'), rotationInput: document.querySelector('#rotationInput'), gridWrap: document.querySelector('.grid-wrap')
+        rotationRange: document.querySelector('#rotationRange'), rotationInput: document.querySelector('#rotationInput'), gridWrap: document.querySelector('.grid-wrap'),
+        downloadButton: document.querySelector('#downloadButton')
       };
       const emptyCells = size => Array.from({ length: size }, () => Array.from({ length: size }, () => null));
       const colorLabel = hex => hex.toUpperCase();
@@ -444,8 +449,63 @@
         // Lattice geometry follows the orientation selector, particularly for hexagons.
         if (!squareFitShapes.has(state.layout)) renderGrid();
       }
+      // Create a self-contained SVG snapshot. SVG lattices are copied directly;
+      // square-fit grids are rebuilt from their live cell positions and state.
+      function createGridSnapshotSvg() {
+        const liveSvg = el.grid.querySelector(':scope > svg');
+        if (liveSvg) {
+          const snapshot = liveSvg.cloneNode(true);
+          const viewBox = snapshot.getAttribute('viewBox').trim().split(/\s+/).map(Number);
+          snapshot.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          snapshot.setAttribute('width', String(viewBox[2])); snapshot.setAttribute('height', String(viewBox[3]));
+          const style = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+          style.textContent = '.lattice-cell{stroke:rgba(132,164,225,.38);stroke-width:1;vector-effect:non-scaling-stroke}.lattice-buffer{fill:#77849a;stroke:#9da9ba;opacity:.74}';
+          snapshot.prepend(style);
+          return new XMLSerializer().serializeToString(snapshot);
+        }
+        const bounds = el.grid.getBoundingClientRect();
+        const width = Math.max(1, Math.round(bounds.width)), height = Math.max(1, Math.round(bounds.height));
+        const shapes = [...el.grid.querySelectorAll('.cell')].map(cell => {
+          const rect = cell.getBoundingClientRect();
+          const x = rect.left - bounds.left, y = rect.top - bounds.top;
+          const placement = state.cells[Number(cell.dataset.row)][Number(cell.dataset.column)];
+          const base = `<rect x="${x}" y="${y}" width="${rect.width}" height="${rect.height}" fill="#A9DEFE"/>`;
+          if (!placement) return base;
+          const points = normalizedPolygonCoordinates(placement.sides, placement.rotation)
+            .map(point => `${(x + point.x * rect.width / 100).toFixed(2)},${(y + point.y * rect.height / 100).toFixed(2)}`).join(' ');
+          return `${base}<polygon points="${points}" fill="${placement.color}"/>`;
+        }).join('');
+        return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#77849a"/>${shapes}</svg>`;
+      }
+      function downloadGridJpg() {
+        const button = el.downloadButton;
+        button.disabled = true; button.textContent = 'Preparing JPG…';
+        const svgData = createGridSnapshotSvg();
+        const image = new Image();
+        const svgUrl = URL.createObjectURL(new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' }));
+        image.onload = () => {
+          const scale = 2, canvas = document.createElement('canvas');
+          canvas.width = image.naturalWidth * scale; canvas.height = image.naturalHeight * scale;
+          const context = canvas.getContext('2d'); context.fillStyle = '#A9DEFE'; context.fillRect(0, 0, canvas.width, canvas.height);
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(svgUrl);
+          canvas.toBlob(blob => {
+            if (blob) {
+              const link = document.createElement('a');
+              const downloadUrl = URL.createObjectURL(blob);
+              link.href = downloadUrl; link.download = `panel-wizard-${state.shape}-${state.size}x${state.size}.jpg`;
+              document.body.append(link); link.click(); link.remove(); URL.revokeObjectURL(downloadUrl);
+              el.placementStatus.textContent = 'JPG snapshot downloaded.';
+            } else el.placementStatus.textContent = 'Could not create the JPG snapshot.';
+            button.disabled = false; button.textContent = 'Download Matrix';
+          }, 'image/jpeg', .94);
+        };
+        image.onerror = () => { URL.revokeObjectURL(svgUrl); button.disabled = false; button.textContent = 'Download Matrix'; el.placementStatus.textContent = 'Could not prepare the grid image.'; };
+        image.src = svgUrl;
+      }
       el.rotationRange.addEventListener('input', () => updateRotation(el.rotationRange.value));
       el.rotationInput.addEventListener('input', () => updateRotation(el.rotationInput.value));
+      el.downloadButton.addEventListener('click', downloadGridJpg);
       document.querySelector('#fillButton').addEventListener('click', () => { const definition = shapeDefinitions[state.shape]; const rotationForFill = (row, column) => uniformLatticeShapes.has(state.layout) || squareFitShapes.has(state.layout) || state.layout === 'hexagon' ? state.rotation : latticeOrientation(row, column); state.cells = Array.from({ length: state.size }, (_, row) => Array.from({ length: state.size }, (_, column) => ({ shape: state.shape, sides: definition.sides, rotation: rotationForFill(row, column), color: state.colors[state.activeColor] }))); renderGrid(); });
       document.querySelector('#clearCellButton').addEventListener('click', () => { setMode('clear-one'); el.placementStatus.textContent = 'Clear-one-cell mode: click the cell you want to remove.'; });
       document.querySelector('#clearButton').addEventListener('click', () => { setMode('place'); state.cells = emptyCells(state.size); renderGrid(); });
